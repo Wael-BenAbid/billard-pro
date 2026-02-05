@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User, BilliardSession, PS4Session, InventoryItem, PS4Game, PS4TimeOption, AppSettings, BarOrder
+from .models import User, BilliardSession, PS4Session, InventoryItem, PS4Game, PS4TimeOption, AppSettings, BarOrder, Client
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -123,3 +123,10 @@ class BarOrderSerializer(serializers.ModelSerializer):
         model = BarOrder
         fields = '__all__'
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ClientSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Client
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at', 'updated_at', 'loyalty_points', 'total_spent', 'total_sessions', 'is_vip']

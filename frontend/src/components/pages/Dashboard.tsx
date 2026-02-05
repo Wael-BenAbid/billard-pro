@@ -5,10 +5,13 @@ interface DashboardProps {
   sessions: BilliardSession[];
   settings: AppSettings;
   currentTime: Date;
-  onStartStop: (tableId: 'A' | 'B') => void;
+  onStartStop: (tableId: 'A' | 'B', clientName?: string, rateType?: 'normal' | 'vip') => void;
   onTogglePayment: (id: string) => void;
-  onNameSession: (sessionId: string, name: string) => void;
+  onNameSession: (sessionId: string, name: string, existingSession?: BilliardSession) => void;
   onDeleteSession: (sessionId: string) => void;
+  onEditSession: (sessionId: string, updates: Partial<BilliardSession>) => void;
+  onRequestAdmin: () => void;
+  isAdmin: boolean;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -19,10 +22,27 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onTogglePayment,
   onNameSession,
   onDeleteSession,
+  onEditSession,
+  onRequestAdmin,
+  isAdmin,
 }) => {
   const [completedSession, setCompletedSession] = React.useState<BilliardSession | null>(null);
   const [completedTableId, setCompletedTableId] = React.useState<'A' | 'B' | null>(null);
   const [clientName, setClientName] = React.useState('');
+  const [rateType, setRateType] = React.useState<'normal' | 'vip'>('normal');
+  const [showStartModal, setShowStartModal] = React.useState(false);
+  
+  // Edit session modal state
+  const [editingSession, setEditingSession] = React.useState<BilliardSession | null>(null);
+  const [editForm, setEditForm] = React.useState({
+    clientName: '',
+    durationMinutes: 0,
+    price: 0,
+    isPaid: false,
+  });
+  const [adminPassword, setAdminPassword] = React.useState('');
+  const [showPasswordModal, setShowPasswordModal] = React.useState(false);
+  const [passwordForSession, setPasswordForSession] = React.useState<BilliardSession | null>(null);
 
   const formatPrice = (mil: number) => {
     if (mil < 10000) return `${Math.round(mil)} mil`;
@@ -30,14 +50,61 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return `${dt.toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 3 })} DT`;
   };
 
+  // Professional timer: calculate elapsed time from startTime timestamp
+  // This ensures accuracy even if page is refreshed
+  const calculateElapsed = (startTime: string | null | undefined) => {
+    if (!startTime) return 0;
+    const start = typeof startTime === 'string' && startTime.includes('T') 
+      ? new Date(startTime).getTime() 
+      : Date.now();
+    return Date.now() - start;
+  };
+
   const formatTime = (time: string | null | undefined) => {
     if (!time) return '--:--';
-    // Handle ISO format or time string
     if (time.includes('T')) {
       const date = new Date(time);
       return date.toLocaleTimeString('fr-FR', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
     }
     return time;
+  };
+
+  const formatDuration = (ms: number) => {
+    const seconds = Math.floor((ms / 1000) % 60);
+    const minutes = Math.floor((ms / (1000 * 60)) % 60);
+    const hours = Math.floor(ms / (1000 * 60 * 60));
+    
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    if (hours > 0) {
+      return `${hours}:${pad(minutes)}:${pad(seconds)}`;
+    }
+    return `${pad(minutes)}:${pad(seconds)}`;
+  };
+
+  // Calculate occupation rate for today
+  const calculateOccupationRate = (tableId: 'A' | 'B') => {
+    const today = new Date().toISOString().split('T')[0];
+    const dayStart = new Date(today + 'T00:00:00');
+    const now = new Date();
+    const totalMinutesToday = (now.getTime() - dayStart.getTime()) / 60000;
+    
+    const tableSessions = sessions.filter(s => 
+      s.tableId === tableId && 
+      s.date === today &&
+      s.stopTime !== null
+    );
+    
+    const occupiedMinutes = tableSessions.reduce((sum, s) => sum + s.durationMinutes, 0);
+    
+    // Add current session if active
+    const activeSession = sessions.find(s => s.tableId === tableId && !s.stopTime && s.date === today);
+    if (activeSession) {
+      const startTime = new Date(activeSession.startTime);
+      const currentMinutes = Math.floor((now.getTime() - startTime.getTime()) / 60000);
+      return Math.min(100, Math.round(((occupiedMinutes + currentMinutes) / totalMinutesToday) * 100));
+    }
+    
+    return Math.min(100, Math.round((occupiedMinutes / totalMinutesToday) * 100));
   };
 
   const getTableSessions = (tableId: 'A' | 'B') => {
@@ -53,28 +120,35 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const handleStartStop = (tableId: 'A' | 'B') => {
     const active = sessions.find(s => s.tableId === tableId && !s.stopTime);
     if (active) {
-      // Show client name modal
+      // Show client name modal for stopping
       setCompletedSession(active);
       setCompletedTableId(tableId);
-      setClientName('');
+      setClientName(active.clientName || '');
+      setShowStartModal(false);
     } else {
-      onStartStop(tableId);
+      // Show start modal with client selection
+      setCompletedSession(null);
+      setCompletedTableId(tableId);
+      setClientName('');
+      setRateType('normal');
+      setShowStartModal(true);
+    }
+  };
+
+  const handleConfirmStart = () => {
+    if (completedTableId) {
+      onStartStop(completedTableId, clientName.trim() || 'Anonyme', rateType);
+      setShowStartModal(false);
+      setCompletedTableId(null);
+      setClientName('');
     }
   };
 
   const handleConfirmClient = () => {
     if (completedSession && completedTableId) {
-      // Stop the session and set the name in one go
-      const name = clientName.trim() || 'Unknown';
-      
-      // First update the session with the name
-      const updatedSession = {
-        ...completedSession,
-        clientName: name,
-      };
-      
+      const name = clientName.trim() || 'Anonyme';
+      const updatedSession = { ...completedSession, clientName: name };
       onNameSession(completedSession.id, name, updatedSession);
-      
       setCompletedSession(null);
       setCompletedTableId(null);
       setClientName('');
@@ -83,23 +157,56 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const handleSkipClient = () => {
     if (completedSession && completedTableId) {
-      // Stop the session without name
-      const updatedSession = {
-        ...completedSession,
-        clientName: 'Unknown',
-      };
-      
-      onNameSession(completedSession.id, 'Unknown', updatedSession);
-      
+      const updatedSession = { ...completedSession, clientName: 'Anonyme' };
+      onNameSession(completedSession.id, 'Anonyme', updatedSession);
       setCompletedSession(null);
       setCompletedTableId(null);
       setClientName('');
     }
   };
 
-  const handleDeleteSession = (sessionId: string, tableId: 'A' | 'B') => {
-    if (window.confirm('Voulez-vous vraiment supprimer cette session ?')) {
-      onDeleteSession(sessionId);
+  const handleDeleteSession = (sessionId: string) => {
+    if (isAdmin) {
+      if (window.confirm('Voulez-vous vraiment supprimer cette session ?')) {
+        onDeleteSession(sessionId);
+      }
+    } else {
+      // Request admin password first
+      setPasswordForSession(sessions.find(s => s.id === sessionId) || null);
+      setShowPasswordModal(true);
+    }
+  };
+
+  const handlePasswordConfirm = () => {
+    if (passwordForSession && adminPassword === 'admin123') {
+      onDeleteSession(passwordForSession.id);
+      setShowPasswordModal(false);
+      setAdminPassword('');
+      setPasswordForSession(null);
+    } else {
+      alert('Mot de passe incorrect');
+    }
+  };
+
+  const handleEditSession = (session: BilliardSession) => {
+    if (isAdmin) {
+      setEditingSession(session);
+      setEditForm({
+        clientName: session.clientName || '',
+        durationMinutes: session.durationMinutes,
+        price: session.price,
+        isPaid: session.isPaid,
+      });
+    } else {
+      setPasswordForSession(session);
+      setShowPasswordModal(true);
+    }
+  };
+
+  const handleEditConfirm = () => {
+    if (editingSession) {
+      onEditSession(editingSession.id, editForm);
+      setEditingSession(null);
     }
   };
 
@@ -110,11 +217,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
         {['A', 'B'].map(tId => {
           const active = sessions.find(s => s.tableId === tId && !s.stopTime);
           const tableColor = tId === 'A' ? settings.tableAColor : settings.tableBColor;
-          const elapsed = active ? Math.floor((Date.now() - active.timestamp) / 1000) : 0;
-          const mins = Math.floor(elapsed / 60);
-          const secs = elapsed % 60;
-          const hours = Math.floor(mins / 60);
-          const displayMins = mins % 60;
+          const elapsed = active ? calculateElapsed(active.startTime) : 0;
+          const mins = Math.floor(elapsed / 60000);
+          const secs = Math.floor((elapsed % 60000) / 1000);
 
           return (
             <div
@@ -187,8 +292,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   }}
                   className="text-6xl font-mono font-black tracking-wider"
                 >
-                  {hours > 0 ? `${hours}:` : ''}
-                  {displayMins.toString().padStart(2, '0')}:{secs.toString().padStart(2, '0')}
+                  {formatDuration(elapsed)}
                 </p>
               </div>
 
@@ -203,13 +307,32 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </div>
                 <div className="bg-black/40 backdrop-blur-sm p-4 rounded-[1.5rem] border border-white/5 text-center">
                   <p className="text-zinc-500 text-[8px] font-black uppercase mb-1 tracking-widest">
-                    TARIF
+                    CLIENT
                   </p>
-                  <p style={{ color: tableColor }} className="text-xl font-black">
-                    {active
-                      ? formatPrice(Math.round((elapsed / 60) * settings.rateBase))
-                      : '0 DT'}
+                  <p className="text-lg font-bold text-white truncate">
+                    {active?.clientName || '--'}
                   </p>
+                </div>
+              </div>
+
+              {/* Occupation Rate Bar */}
+              <div className="mb-4">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-[10px] font-black text-zinc-600 uppercase tracking-widest">
+                    Occupation Today
+                  </span>
+                  <span className="text-[10px] font-black" style={{ color: tableColor }}>
+                    {calculateOccupationRate(tId as 'A' | 'B')}%
+                  </span>
+                </div>
+                <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{
+                      width: `${calculateOccupationRate(tId as 'A' | 'B')}%`,
+                      backgroundColor: tableColor,
+                    }}
+                  />
                 </div>
               </div>
 
@@ -232,6 +355,43 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
           );
         })}
+      </div>
+
+      {/* Overall Occupation Stats */}
+      <div className="bg-zinc-900/30 rounded-[3rem] border border-white/5 p-8">
+        <h3 className="text-lg font-black italic tracking-tighter uppercase text-white mb-6">
+          Taux d'Occupation Global
+        </h3>
+        <div className="grid grid-cols-2 gap-8">
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-sm font-bold text-white">Table A</span>
+              <span className="text-sm font-bold" style={{ color: settings.tableAColor }}>
+                {calculateOccupationRate('A')}%
+              </span>
+            </div>
+            <div className="h-4 bg-zinc-800 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-500"
+                style={{ width: `${calculateOccupationRate('A')}%`, backgroundColor: settings.tableAColor }}
+              />
+            </div>
+          </div>
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-sm font-bold text-white">Table B</span>
+              <span className="text-sm font-bold" style={{ color: settings.tableBColor }}>
+                {calculateOccupationRate('B')}%
+              </span>
+            </div>
+            <div className="h-4 bg-zinc-800 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-500"
+                style={{ width: `${calculateOccupationRate('B')}%`, backgroundColor: settings.tableBColor }}
+              />
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Sessions du Jour - Side by Side */}
@@ -262,28 +422,33 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <thead>
                 <tr className="text-[10px] font-black text-zinc-600 uppercase border-b border-white/5 bg-zinc-900/50">
                   <th className="p-4">Client</th>
-                  <th className="p-4">Durée</th>
-                  <th className="p-4">Total</th>
-                  <th className="p-4">Paiement</th>
+                  <th className="p-4">Heure</th>
+                  <th className="p-4">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
                 {tableASessions.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={4}
+                      colSpan={3}
                       className="p-8 text-center text-zinc-700 font-black uppercase text-xs tracking-widest"
                     >
                       Aucune session
                     </td>
                   </tr>
                 ) : (
-                  tableASessions.map(s => (
+                  tableASessions.slice(0, 10).map(s => (
                     <tr key={s.id} className="hover:bg-white/5 transition-all">
                       <td className="p-4 font-bold text-white text-sm">{s.clientName || 'En cours...'}</td>
-                      <td className="p-4 font-bold text-white text-sm">{s.durationMinutes} min</td>
-                      <td className="p-4 font-black text-white text-sm">{formatPrice(s.price)}</td>
+                      <td className="p-4 font-bold text-white text-sm">{formatTime(s.startTime)}</td>
                       <td className="p-4 flex gap-2">
+                        <button
+                          onClick={() => handleEditSession(s)}
+                          className="p-2 rounded-lg bg-zinc-800 hover:bg-amber-500/20 text-zinc-400 hover:text-amber-500 transition-all"
+                          title="Éditer"
+                        >
+                          ✏️
+                        </button>
                         <button
                           onClick={() => onTogglePayment(s.id)}
                           className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase border transition-all ${
@@ -295,7 +460,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           {s.isPaid ? 'Payé' : 'Non payé'}
                         </button>
                         <button
-                          onClick={() => handleDeleteSession(s.id, 'A')}
+                          onClick={() => handleDeleteSession(s.id)}
                           className="p-2 rounded-lg bg-zinc-800 hover:bg-red-500/20 text-zinc-400 hover:text-red-500 transition-all"
                           title="Supprimer"
                         >
@@ -336,28 +501,33 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <thead>
                 <tr className="text-[10px] font-black text-zinc-600 uppercase border-b border-white/5 bg-zinc-900/50">
                   <th className="p-4">Client</th>
-                  <th className="p-4">Durée</th>
-                  <th className="p-4">Total</th>
-                  <th className="p-4">Paiement</th>
+                  <th className="p-4">Heure</th>
+                  <th className="p-4">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
                 {tableBSessions.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={4}
+                      colSpan={3}
                       className="p-8 text-center text-zinc-700 font-black uppercase text-xs tracking-widest"
                     >
                       Aucune session
                     </td>
                   </tr>
                 ) : (
-                  tableBSessions.map(s => (
+                  tableBSessions.slice(0, 10).map(s => (
                     <tr key={s.id} className="hover:bg-white/5 transition-all">
                       <td className="p-4 font-bold text-white text-sm">{s.clientName || 'En cours...'}</td>
-                      <td className="p-4 font-bold text-white text-sm">{s.durationMinutes} min</td>
-                      <td className="p-4 font-black text-white text-sm">{formatPrice(s.price)}</td>
+                      <td className="p-4 font-bold text-white text-sm">{formatTime(s.startTime)}</td>
                       <td className="p-4 flex gap-2">
+                        <button
+                          onClick={() => handleEditSession(s)}
+                          className="p-2 rounded-lg bg-zinc-800 hover:bg-amber-500/20 text-zinc-400 hover:text-amber-500 transition-all"
+                          title="Éditer"
+                        >
+                          ✏️
+                        </button>
                         <button
                           onClick={() => onTogglePayment(s.id)}
                           className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase border transition-all ${
@@ -369,7 +539,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           {s.isPaid ? 'Payé' : 'Non payé'}
                         </button>
                         <button
-                          onClick={() => handleDeleteSession(s.id, 'B')}
+                          onClick={() => handleDeleteSession(s.id)}
                           className="p-2 rounded-lg bg-zinc-800 hover:bg-red-500/20 text-zinc-400 hover:text-red-500 transition-all"
                           title="Supprimer"
                         >
@@ -385,8 +555,88 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </section>
       </div>
 
+      {/* Start Session Modal */}
+      {showStartModal && completedTableId && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center p-6 bg-black/90 backdrop-blur-xl animate-in fade-in duration-300">
+          <div className="w-full max-w-md bg-zinc-900 rounded-[3rem] border border-white/10 p-10 shadow-2xl space-y-6">
+            <div className="text-center">
+              <div
+                className="w-20 h-20 mx-auto rounded-full flex items-center justify-center mb-4"
+                style={{ backgroundColor: `${settings.themeColor}20` }}
+              >
+                <span className="text-4xl">🎱</span>
+              </div>
+              <h2 className="text-3xl font-black italic text-white">
+                Nouvelle Session
+              </h2>
+              <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mt-2">
+                Table {completedTableId}
+              </p>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest">
+                Nom du Client
+              </label>
+              <input
+                type="text"
+                value={clientName}
+                onChange={e => setClientName(e.target.value)}
+                placeholder="Entrez le nom du client"
+                className="w-full bg-black/50 border border-white/10 rounded-2xl px-6 py-5 text-white font-bold text-lg mt-2"
+                autoFocus
+              />
+            </div>
+
+            <div>
+              <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest">
+                Tarif
+              </label>
+              <div className="flex gap-4 mt-2">
+                <button
+                  onClick={() => setRateType('normal')}
+                  className={`flex-1 py-4 rounded-2xl font-black text-sm uppercase transition-all ${
+                    rateType === 'normal'
+                      ? 'bg-emerald-500 text-black'
+                      : 'bg-zinc-800 text-zinc-400'
+                  }`}
+                >
+                  Normal
+                </button>
+                <button
+                  onClick={() => setRateType('vip')}
+                  className={`flex-1 py-4 rounded-2xl font-black text-sm uppercase transition-all ${
+                    rateType === 'vip'
+                      ? 'bg-amber-500 text-black'
+                      : 'bg-zinc-800 text-zinc-400'
+                  }`}
+                >
+                  VIP
+                </button>
+              </div>
+            </div>
+
+            <div className="flex gap-4 pt-4">
+              <button
+                onClick={() => setShowStartModal(false)}
+                className="flex-1 py-4 bg-zinc-800 rounded-2xl font-black text-sm uppercase text-zinc-400 hover:bg-zinc-700"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleConfirmStart}
+                style={{ backgroundColor: settings.themeColor }}
+                className="flex-1 py-4 rounded-2xl font-black text-sm uppercase text-black hover:brightness-110"
+              >
+                Démarrer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Client Name Modal */}
-      {completedSession && (
+      {completedSession && !showStartModal && (
         <div className="fixed inset-0 z-[130] flex items-center justify-center p-6 bg-black/90 backdrop-blur-xl animate-in fade-in duration-300">
           <div className="w-full max-w-md bg-zinc-900 rounded-[3rem] border border-white/10 p-10 shadow-2xl space-y-6">
             <div className="text-center">
@@ -400,7 +650,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 Session Terminée
               </h2>
               <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mt-2">
-                Total: {formatPrice(completedSession.price)}
+                Durée: {formatDuration(calculateElapsed(completedSession.startTime))}
               </p>
             </div>
 
@@ -437,8 +687,146 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
       )}
+
+      {/* Edit Session Modal */}
+      {editingSession && (
+        <div className="fixed inset-0 z-[140] flex items-center justify-center p-6 bg-black/90 backdrop-blur-xl animate-in fade-in duration-300">
+          <div className="w-full max-w-md bg-zinc-900 rounded-[3rem] border border-white/10 p-10 shadow-2xl space-y-6">
+            <div className="text-center">
+              <div
+                className="w-20 h-20 mx-auto rounded-full flex items-center justify-center mb-4"
+                style={{ backgroundColor: `${settings.themeColor}20` }}
+              >
+                <span className="text-4xl">✏️</span>
+              </div>
+              <h2 className="text-3xl font-black italic text-white">
+                Éditer Session
+              </h2>
+              <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mt-2">
+                Table {editingSession.tableId}
+              </p>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest">
+                Nom du Client
+              </label>
+              <input
+                type="text"
+                value={editForm.clientName}
+                onChange={e => setEditForm({ ...editForm, clientName: e.target.value })}
+                className="w-full bg-black/50 border border-white/10 rounded-2xl px-6 py-5 text-white font-bold text-lg mt-2"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest">
+                  Durée (min)
+                </label>
+                <input
+                  type="number"
+                  value={editForm.durationMinutes}
+                  onChange={e => setEditForm({ ...editForm, durationMinutes: parseInt(e.target.value) || 0 })}
+                  className="w-full bg-black/50 border border-white/10 rounded-2xl px-6 py-5 text-white font-bold text-lg mt-2"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-zinc-600 uppercase tracking-widest">
+                  Prix (DT)
+                </label>
+                <input
+                  type="number"
+                  value={(editForm.price / 1000).toFixed(3)}
+                  onChange={e => setEditForm({ ...editForm, price: parseFloat(e.target.value) * 1000 })}
+                  className="w-full bg-black/50 border border-white/10 rounded-2xl px-6 py-5 text-white font-bold text-lg mt-2"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={editForm.isPaid}
+                  onChange={e => setEditForm({ ...editForm, isPaid: e.target.checked })}
+                  className="w-5 h-5 rounded"
+                />
+                <span className="text-white font-bold">Payé</span>
+              </label>
+            </div>
+
+            <div className="flex gap-4 pt-4">
+              <button
+                onClick={() => setEditingSession(null)}
+                className="flex-1 py-4 bg-zinc-800 rounded-2xl font-black text-sm uppercase text-zinc-400 hover:bg-zinc-700"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleEditConfirm}
+                style={{ backgroundColor: settings.themeColor }}
+                className="flex-1 py-4 rounded-2xl font-black text-sm uppercase text-black hover:brightness-110"
+              >
+                Sauvegarder
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Admin Password Modal */}
+      {showPasswordModal && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-6 bg-black/90 backdrop-blur-xl animate-in fade-in duration-300">
+          <div className="w-full max-w-sm bg-zinc-900 rounded-[3rem] border border-white/10 p-10 shadow-2xl space-y-6">
+            <div className="text-center">
+              <div
+                className="w-16 h-16 mx-auto rounded-full flex items-center justify-center mb-4"
+                style={{ backgroundColor: `${settings.themeColor}20` }}
+              >
+                <span className="text-3xl">🔐</span>
+              </div>
+              <h2 className="text-2xl font-black italic text-white">
+                Administration
+              </h2>
+              <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mt-2">
+                Mot de passe requis
+              </p>
+            </div>
+
+            <div>
+              <input
+                type="password"
+                value={adminPassword}
+                onChange={e => setAdminPassword(e.target.value)}
+                placeholder="Mot de passe admin"
+                className="w-full bg-black/50 border border-white/10 rounded-2xl px-6 py-5 text-white font-bold text-lg mt-2 text-center"
+                autoFocus
+              />
+            </div>
+
+            <div className="flex gap-4 pt-4">
+              <button
+                onClick={() => {
+                  setShowPasswordModal(false);
+                  setAdminPassword('');
+                  setPasswordForSession(null);
+                }}
+                className="flex-1 py-4 bg-zinc-800 rounded-2xl font-black text-sm uppercase text-zinc-400 hover:bg-zinc-700"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handlePasswordConfirm}
+                style={{ backgroundColor: settings.themeColor }}
+                className="flex-1 py-4 rounded-2xl font-black text-sm uppercase text-black hover:brightness-110"
+              >
+                Valider
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
-
-export default Dashboard;

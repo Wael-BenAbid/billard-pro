@@ -3,12 +3,12 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.contrib.auth.hashers import make_password, check_password
-from .models import User, BilliardSession, PS4Session, InventoryItem, PS4Game, PS4TimeOption, AppSettings, BarOrder
+from .models import User, BilliardSession, PS4Session, InventoryItem, PS4Game, PS4TimeOption, AppSettings, BarOrder, Client
 from .serializers import (
     UserSerializer, UserLoginSerializer, BilliardSessionSerializer, 
     PS4SessionSerializer, InventoryItemSerializer, PS4GameSerializer,
     PS4TimeOptionSerializer, AppSettingsSerializer, AnalyticsSerializer,
-    BarOrderSerializer
+    BarOrderSerializer, ClientSerializer
 )
 
 
@@ -258,3 +258,53 @@ class BarOrderViewSet(viewsets.ModelViewSet):
         if date:
             queryset = queryset.filter(date=date)
         return queryset
+
+
+class ClientViewSet(viewsets.ModelViewSet):
+    queryset = Client.objects.all()
+    serializer_class = ClientSerializer
+    
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        search = self.request.query_params.get('search')
+        if search:
+            queryset = queryset.filter(name__icontains=search)
+        return queryset
+    
+    @action(detail=False, methods=['get'])
+    def search(self, request):
+        """Search clients by name"""
+        query = request.query_params.get('q', '')
+        clients = Client.objects.filter(name__icontains=query)[:10]
+        return Response(ClientSerializer(clients, many=True).data)
+    
+    @action(detail=True, methods=['post'])
+    def add_loyalty_points(self, request, pk=None):
+        """Add loyalty points to a client"""
+        client = self.get_object()
+        points = request.data.get('points', 0)
+        client.loyalty_points += int(points)
+        # Auto upgrade to VIP at 1000 points
+        if client.loyalty_points >= 1000:
+            client.is_vip = True
+        client.save()
+        return Response(ClientSerializer(client).data)
+    
+    @action(detail=True, methods=['post'])
+    def record_session(self, request, pk=None):
+        """Record a session for a client and update stats"""
+        client = self.get_object()
+        price = request.data.get('price', 0)
+        
+        client.total_spent += float(price)
+        client.total_sessions += 1
+        
+        # Add loyalty points (1 point per 1 DT spent)
+        client.loyalty_points += int(float(price))
+        
+        # Auto upgrade to VIP at 1000 points
+        if client.loyalty_points >= 1000:
+            client.is_vip = True
+        
+        client.save()
+        return Response(ClientSerializer(client).data)

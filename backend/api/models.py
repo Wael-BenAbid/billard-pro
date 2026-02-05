@@ -17,6 +17,29 @@ class User(models.Model):
         return self.username
 
 
+class Client(models.Model):
+    """Client model for loyalty points and history tracking"""
+    name = models.CharField(max_length=255)
+    phone = models.CharField(max_length=20, null=True, blank=True)
+    loyalty_points = models.IntegerField(default=0)
+    total_spent = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    total_sessions = models.IntegerField(default=0)
+    is_vip = models.BooleanField(default=False)
+    notes = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-total_spent']
+        indexes = [
+            models.Index(fields=['name']),
+            models.Index(fields=['is_vip']),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
 class BilliardSession(models.Model):
     table_id = models.CharField(max_length=1)  # 'A' or 'B'
     start_time = models.DateTimeField()
@@ -25,7 +48,7 @@ class BilliardSession(models.Model):
     price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     client_name = models.CharField(max_length=255, null=True, blank=True)
     is_paid = models.BooleanField(default=False)
-    date = models.DateField()
+    date = models.DateField(null=True, blank=True)
     timestamp = models.BigIntegerField()
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

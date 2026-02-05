@@ -367,14 +367,14 @@ const App: React.FC = () => {
     localStorage.removeItem('billard_auth');
   };
 
-  const handleStartStop = (tableId: 'A' | 'B') => {
+  const handleStartStop = (tableId: 'A' | 'B', clientName?: string, rateType?: 'normal' | 'vip') => {
     const now = new Date();
     const nowISO = now.toISOString();
     const dateStr = nowISO.split('T')[0];
     const activeIdx = sessions.findIndex(s => s.tableId === tableId && !s.stopTime);
 
     if (activeIdx === -1) {
-      // Start new session
+      // Start new session with client name
       const newSession: BilliardSession = {
         id: Math.random().toString(36).substr(2, 9),
         tableId,
@@ -383,7 +383,7 @@ const App: React.FC = () => {
         durationMinutes: 0,
         price: 0,
         items: [],
-        clientName: '',
+        clientName: clientName || 'Anonyme',
         isPaid: false,
         nextPlayer: '',
         date: dateStr,
@@ -490,6 +490,33 @@ const App: React.FC = () => {
     );
   }, [sessions, viewingClientHistory]);
 
+  // Z-Ticket (Daily Revenue) calculation
+  const zTicket = useMemo(() => {
+    const today = new Date().toISOString().split('T')[0];
+    const todaySessions = sessions.filter(s => s.date === today && s.stopTime !== null);
+    
+    const totalRevenue = todaySessions.reduce((sum, s) => sum + (s.isPaid ? s.price : 0), 0);
+    const pendingPayment = todaySessions.reduce((sum, s) => sum + (!s.isPaid ? s.price : 0), 0);
+    const sessionCount = todaySessions.length;
+    const avgSessionPrice = sessionCount > 0 ? Math.round(totalRevenue / sessionCount) : 0;
+    
+    return {
+      totalRevenue,
+      pendingPayment,
+      sessionCount,
+      avgSessionPrice,
+    };
+  }, [sessions]);
+
+  const handleEditSession = (sessionId: string, updates: Partial<BilliardSession>) => {
+    const session = sessions.find(s => s.id === sessionId);
+    if (session) {
+      const updated = { ...session, ...updates };
+      setSessions(prev => prev.map(s => s.id === sessionId ? updated : s));
+      saveSessionToAPI(updated);
+    }
+  };
+
   // Login Screen
   if (!user) {
     return (
@@ -553,15 +580,45 @@ const App: React.FC = () => {
 
       <main className="p-8 max-w-[1600px] mx-auto space-y-12">
         {activeTab === 'dashboard' && (
-          <Dashboard
-            sessions={sessions}
-            currentTime={currentTime}
-            settings={settings}
-            onStartStop={handleStartStop}
-            onTogglePayment={togglePayment}
-            onNameSession={handleNameSession}
-            onDeleteSession={handleDeleteSession}
-          />
+          <>
+            {/* Z-Ticket Display */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+              <div className="bg-zinc-900/50 rounded-[2rem] p-6 border border-white/5 text-center">
+                <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">CA Today</p>
+                <p className="text-2xl font-black" style={{ color: settings.themeColor }}>
+                  {(zTicket.totalRevenue / 1000).toFixed(3)} DT
+                </p>
+              </div>
+              <div className="bg-zinc-900/50 rounded-[2rem] p-6 border border-white/5 text-center">
+                <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">En Attente</p>
+                <p className="text-2xl font-black text-red-500">
+                  {(zTicket.pendingPayment / 1000).toFixed(3)} DT
+                </p>
+              </div>
+              <div className="bg-zinc-900/50 rounded-[2rem] p-6 border border-white/5 text-center">
+                <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Sessions</p>
+                <p className="text-2xl font-black text-white">{zTicket.sessionCount}</p>
+              </div>
+              <div className="bg-zinc-900/50 rounded-[2rem] p-6 border border-white/5 text-center">
+                <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Moyenne</p>
+                <p className="text-2xl font-black text-white">
+                  {(zTicket.avgSessionPrice / 1000).toFixed(3)} DT
+                </p>
+              </div>
+            </div>
+            
+            <Dashboard
+              sessions={sessions}
+              currentTime={currentTime}
+              settings={settings}
+              onStartStop={handleStartStop}
+              onTogglePayment={togglePayment}
+              onNameSession={handleNameSession}
+              onDeleteSession={handleDeleteSession}
+              onEditSession={handleEditSession}
+              isAdmin={user?.role === 'admin'}
+            />
+          </>
         )}
 
         {activeTab === 'ps4' && (
