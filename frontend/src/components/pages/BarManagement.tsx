@@ -34,12 +34,18 @@ export const BarManagement: React.FC<BarManagementProps> = ({
   }, []);
 
   const toSnakeCase = (obj: any): any => {
-    const result: any = {};
-    for (const key in obj) {
-      const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
-      result[snakeKey] = obj[key];
+    if (Array.isArray(obj)) {
+      return obj.map(item => toSnakeCase(item));
     }
-    return result;
+    if (obj !== null && typeof obj === 'object') {
+      const result: any = {};
+      for (const key in obj) {
+        const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+        result[snakeKey] = toSnakeCase(obj[key]);
+      }
+      return result;
+    }
+    return obj;
   };
 
   const toCamelCase = (obj: any): any => {
@@ -115,6 +121,17 @@ export const BarManagement: React.FC<BarManagementProps> = ({
     const dt = mil / 1000;
     return `${dt.toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 3 })} DT`;
   };
+
+  // Default inventory items
+  const defaultInventory = [
+    { id: '1', name: 'Café', price: 1000, icon: '☕' },
+    { id: '2', name: 'Thé', price: 800, icon: '🍵' },
+    { id: '3', name: 'Soda', price: 2000, icon: '🥤' },
+    { id: '4', name: 'Eau', price: 1000, icon: '💧' },
+    { id: '5', name: 'Chicha', price: 5000, icon: '💨' },
+  ];
+
+  const getInventory = () => settings.inventory?.length > 0 ? settings.inventory : defaultInventory;
 
   const handleItemClick = (item: InventoryItem) => {
     setPendingItem(item);
@@ -224,7 +241,7 @@ export const BarManagement: React.FC<BarManagementProps> = ({
       <section className="bg-zinc-900/30 rounded-[3rem] border border-white/5 p-10 shadow-2xl">
         <h2 className="text-4xl font-black italic text-white mb-8">Gestion des Consommations</h2>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-          {settings.inventory.map(item => (
+          {getInventory().map(item => (
             <button
               key={item.id}
               onClick={() => handleItemClick(item)}

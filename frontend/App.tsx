@@ -131,12 +131,18 @@ const App: React.FC = () => {
 
   // Data conversion helpers
   const toSnakeCase = (obj: any): any => {
-    const result: any = {};
-    for (const key in obj) {
-      const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
-      result[snakeKey] = obj[key];
+    if (Array.isArray(obj)) {
+      return obj.map(item => toSnakeCase(item));
     }
-    return result;
+    if (obj !== null && typeof obj === 'object') {
+      const result: any = {};
+      for (const key in obj) {
+        const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+        result[snakeKey] = toSnakeCase(obj[key]);
+      }
+      return result;
+    }
+    return obj;
   };
 
   const toCamelCase = (obj: any): any => {
@@ -198,7 +204,13 @@ const App: React.FC = () => {
         if (settingsRes.ok) {
           const settingsData = await settingsRes.json();
           if (settingsData) {
-            setSettings(toCamelCase(settingsData));
+            // Merge with defaults to preserve inventory and ps4Games
+            setSettings(prev => ({
+              ...prev,
+              ...toCamelCase(settingsData),
+              inventory: prev.inventory,
+              ps4Games: prev.ps4Games,
+            }));
           }
         }
 
@@ -231,7 +243,55 @@ const App: React.FC = () => {
 
   const saveSessionToAPI = async (session: BilliardSession) => {
     try {
-      const sessionData = toSnakeCase(session);
+      // Prepare session data with proper datetime format
+      const prepareSessionData = (s: BilliardSession) => {
+        const data: any = {
+          id: s.id,
+          table_id: s.tableId,
+          duration_minutes: Number(s.durationMinutes) || 0,
+          price: Number(s.price) || 0,
+          client_name: s.clientName || '',
+          is_paid: s.isPaid,
+          timestamp: s.timestamp,
+        };
+        
+        // Convert start_time to ISO format
+        if (s.startTime) {
+          const startTime = s.startTime as string;
+          if (startTime.includes('T')) {
+            data.start_time = startTime;
+          } else {
+            const dateStr = s.date || new Date().toISOString().split('T')[0];
+            data.start_time = `${dateStr}T${startTime}:00`;
+          }
+        }
+        
+        // Convert stop_time to ISO format
+        if (s.stopTime) {
+          const stopTime = s.stopTime as string;
+          if (stopTime.includes('T')) {
+            data.stop_time = stopTime;
+          } else {
+            const dateStr = s.date || new Date().toISOString().split('T')[0];
+            data.stop_time = `${dateStr}T${stopTime}:00`;
+          }
+        } else {
+          data.stop_time = null;
+        }
+        
+        // Convert date to YYYY-MM-DD format
+        if (s.date) {
+          if (typeof s.date === 'string' && s.date.includes('T')) {
+            data.date = s.date.split('T')[0];
+          } else {
+            data.date = s.date;
+          }
+        }
+        
+        return data;
+      };
+      
+      const sessionData = prepareSessionData(session);
       
       if (session.id.length < 20) {
         // New session - create
@@ -260,6 +320,7 @@ const App: React.FC = () => {
         } else {
           const error = await res.json();
           console.error('Error updating session:', error);
+          console.error('Session data sent:', JSON.stringify(sessionData, null, 2));
         }
       }
     } catch (error) {
@@ -307,16 +368,17 @@ const App: React.FC = () => {
   };
 
   const handleStartStop = (tableId: 'A' | 'B') => {
-    const nowStr = currentTime.toLocaleTimeString('fr-FR', { hour12: false });
-    const dateStr = currentTime.toISOString().split('T')[0];
-    const activeIdx = sessions.findIndex(s => s.tableId === tableId && s.stopTime === null);
+    const now = new Date();
+    const nowISO = now.toISOString();
+    const dateStr = nowISO.split('T')[0];
+    const activeIdx = sessions.findIndex(s => s.tableId === tableId && !s.stopTime);
 
     if (activeIdx === -1) {
       // Start new session
       const newSession: BilliardSession = {
         id: Math.random().toString(36).substr(2, 9),
         tableId,
-        startTime: nowStr,
+        startTime: nowISO,
         stopTime: null,
         durationMinutes: 0,
         price: 0,
@@ -330,28 +392,50 @@ const App: React.FC = () => {
       setSessions(prev => [newSession, ...prev]);
       saveSessionToAPI(newSession);
     } else {
-      // Stop session
-      const updated = [...sessions];
-      const s = updated[activeIdx];
-      const start = new Date(`1970-01-01T${s.startTime}`);
-      const stop = new Date(`1970-01-01T${nowStr}`);
-      let diff = stop.getTime() - start.getTime();
-      if (diff < 0) diff += 86400000;
-      const mins = Math.round(diff / 60000);
-      const finishedSession = { ...s, stopTime: nowStr, durationMinutes: mins };
+      // Stop session - calculate duration
+      const s = sessions[activeIdx];
+      const startTime = new Date(s.startTime);
+      const stopTime = now;
+      const diffMs = stopTime.getTime() - startTime.getTime();
+      const mins = Math.round(diffMs / 60000);
+      
+      const finishedSession: BilliardSession = {
+        ...s,
+        startTime: s.startTime,
+        stopTime: stopTime.toISOString(),
+        durationMinutes: mins,
+      };
       finishedSession.price = calculateSessionPrice(finishedSession);
-      updated[activeIdx] = finishedSession;
-      setSessions(updated);
+      
+      setSessions(prev => prev.map(session => 
+        session.id === s.id ? finishedSession : session
+      ));
       saveSessionToAPI(finishedSession);
     }
   };
 
-  const handleNameSession = (sessionId: string, name: string) => {
-    const session = sessions.find(s => s.id === sessionId);
-    if (session) {
-      const updated = { ...session, clientName: name };
+  const handleNameSession = (sessionId: string, name: string, existingSession?: BilliardSession) => {
+    // Use the existing session if provided, otherwise find from current state
+    const sessionToUpdate = existingSession || sessions.find(s => s.id === sessionId);
+    if (sessionToUpdate) {
+      const updated = { ...sessionToUpdate, clientName: name };
       setSessions(prev => prev.map(s => s.id === sessionId ? updated : s));
       saveSessionToAPI(updated);
+    }
+  };
+
+  const handleDeleteSession = async (sessionId: string) => {
+    try {
+      const res = await fetch(`${API_URL}/sessions/${sessionId}/`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        setSessions(prev => prev.filter(s => s.id !== sessionId));
+      } else {
+        console.error('Error deleting session');
+      }
+    } catch (error) {
+      console.error('Error deleting session:', error);
     }
   };
 
@@ -369,7 +453,7 @@ const App: React.FC = () => {
     if (timePrice < settings.floorMin) finalTimePrice = settings.floorMin;
     else if (timePrice > settings.floorMin && timePrice < settings.floorMid)
       finalTimePrice = settings.floorMid;
-    const itemsPrice = session.items.reduce(
+    const itemsPrice = (session.items || []).reduce(
       (acc, item) => acc + item.price * item.quantity,
       0
     );
@@ -476,6 +560,7 @@ const App: React.FC = () => {
             onStartStop={handleStartStop}
             onTogglePayment={togglePayment}
             onNameSession={handleNameSession}
+            onDeleteSession={handleDeleteSession}
           />
         )}
 

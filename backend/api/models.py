@@ -19,13 +19,13 @@ class User(models.Model):
 
 class BilliardSession(models.Model):
     table_id = models.CharField(max_length=1)  # 'A' or 'B'
-    start_time = models.CharField(max_length=20)
-    stop_time = models.CharField(max_length=20, null=True, blank=True)
+    start_time = models.DateTimeField()
+    stop_time = models.DateTimeField(null=True, blank=True)
     duration_minutes = models.IntegerField(default=0)
     price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     client_name = models.CharField(max_length=255, null=True, blank=True)
     is_paid = models.BooleanField(default=False)
-    date = models.CharField(max_length=10)
+    date = models.DateField()
     timestamp = models.BigIntegerField()
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

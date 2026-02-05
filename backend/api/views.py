@@ -49,6 +49,13 @@ class BilliardSessionViewSet(viewsets.ModelViewSet):
         if date:
             queryset = queryset.filter(date=date)
         return queryset
+    
+    @action(detail=True, methods=['delete'])
+    def delete_session(self, request, pk=None):
+        """Delete a specific session"""
+        session = self.get_object()
+        session.delete()
+        return Response({'success': True}, status=status.HTTP_204_NO_CONTENT)
 
 
 class PS4SessionViewSet(viewsets.ModelViewSet):

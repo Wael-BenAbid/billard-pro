@@ -15,6 +15,11 @@ class UserLoginSerializer(serializers.Serializer):
 
 
 class BilliardSessionSerializer(serializers.ModelSerializer):
+    # Override datetime fields to use ISO format
+    start_time = serializers.DateTimeField(format='%H:%M:%S', required=False)
+    stop_time = serializers.DateTimeField(format='%H:%M:%S', required=False, allow_null=True)
+    date = serializers.DateField(format='%Y-%m-%d')
+    
     class Meta:
         model = BilliardSession
         fields = '__all__'
@@ -34,6 +39,25 @@ class BilliardSessionSerializer(serializers.ModelSerializer):
                     snake_key += char
             converted[snake_key] = value
         return super().to_internal_value(converted)
+    
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Convert snake_case to camelCase for frontend
+        camel_data = {}
+        for key, value in data.items():
+            if value is None:
+                camel_data[key.replace('_', '', 1)] = value if not key.startswith('_') else key
+                continue
+            camel_key = ''
+            for i, char in enumerate(key):
+                if char == '_':
+                    continue
+                if i > 0 and key[i-1] == '_':
+                    camel_key += char.upper()
+                else:
+                    camel_key += char
+            camel_data[camel_key] = value
+        return camel_data
 
 
 class PS4SessionSerializer(serializers.ModelSerializer):

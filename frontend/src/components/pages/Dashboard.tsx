@@ -8,6 +8,7 @@ interface DashboardProps {
   onStartStop: (tableId: 'A' | 'B') => void;
   onTogglePayment: (id: string) => void;
   onNameSession: (sessionId: string, name: string) => void;
+  onDeleteSession: (sessionId: string) => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -17,6 +18,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onStartStop,
   onTogglePayment,
   onNameSession,
+  onDeleteSession,
 }) => {
   const [completedSession, setCompletedSession] = React.useState<BilliardSession | null>(null);
   const [completedTableId, setCompletedTableId] = React.useState<'A' | 'B' | null>(null);
@@ -26,6 +28,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
     if (mil < 10000) return `${Math.round(mil)} mil`;
     const dt = mil / 1000;
     return `${dt.toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 3 })} DT`;
+  };
+
+  const formatTime = (time: string | null | undefined) => {
+    if (!time) return '--:--';
+    // Handle ISO format or time string
+    if (time.includes('T')) {
+      const date = new Date(time);
+      return date.toLocaleTimeString('fr-FR', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+    return time;
   };
 
   const getTableSessions = (tableId: 'A' | 'B') => {
@@ -52,27 +64,42 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const handleConfirmClient = () => {
     if (completedSession && completedTableId) {
-      // First stop the session, then set the name
-      onStartStop(completedTableId);
-      setTimeout(() => {
-        onNameSession(completedSession.id, clientName.trim() || 'Unknown');
-        setCompletedSession(null);
-        setCompletedTableId(null);
-        setClientName('');
-      }, 100);
+      // Stop the session and set the name in one go
+      const name = clientName.trim() || 'Unknown';
+      
+      // First update the session with the name
+      const updatedSession = {
+        ...completedSession,
+        clientName: name,
+      };
+      
+      onNameSession(completedSession.id, name, updatedSession);
+      
+      setCompletedSession(null);
+      setCompletedTableId(null);
+      setClientName('');
     }
   };
 
   const handleSkipClient = () => {
     if (completedSession && completedTableId) {
-      // First stop the session, then set the name
-      onStartStop(completedTableId);
-      setTimeout(() => {
-        onNameSession(completedSession.id, 'Unknown');
-        setCompletedSession(null);
-        setCompletedTableId(null);
-        setClientName('');
-      }, 100);
+      // Stop the session without name
+      const updatedSession = {
+        ...completedSession,
+        clientName: 'Unknown',
+      };
+      
+      onNameSession(completedSession.id, 'Unknown', updatedSession);
+      
+      setCompletedSession(null);
+      setCompletedTableId(null);
+      setClientName('');
+    }
+  };
+
+  const handleDeleteSession = (sessionId: string, tableId: 'A' | 'B') => {
+    if (window.confirm('Voulez-vous vraiment supprimer cette session ?')) {
+      onDeleteSession(sessionId);
     }
   };
 
@@ -171,7 +198,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     DÉBUT
                   </p>
                   <p className="text-xl font-mono font-bold text-white">
-                    {active?.startTime || '--:--'}
+                    {active?.startTime ? formatTime(active.startTime) : '--:--'}
                   </p>
                 </div>
                 <div className="bg-black/40 backdrop-blur-sm p-4 rounded-[1.5rem] border border-white/5 text-center">
@@ -256,7 +283,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       <td className="p-4 font-bold text-white text-sm">{s.clientName || 'En cours...'}</td>
                       <td className="p-4 font-bold text-white text-sm">{s.durationMinutes} min</td>
                       <td className="p-4 font-black text-white text-sm">{formatPrice(s.price)}</td>
-                      <td className="p-4">
+                      <td className="p-4 flex gap-2">
                         <button
                           onClick={() => onTogglePayment(s.id)}
                           className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase border transition-all ${
@@ -266,6 +293,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           }`}
                         >
                           {s.isPaid ? 'Payé' : 'Non payé'}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteSession(s.id, 'A')}
+                          className="p-2 rounded-lg bg-zinc-800 hover:bg-red-500/20 text-zinc-400 hover:text-red-500 transition-all"
+                          title="Supprimer"
+                        >
+                          🗑️
                         </button>
                       </td>
                     </tr>
@@ -323,7 +357,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       <td className="p-4 font-bold text-white text-sm">{s.clientName || 'En cours...'}</td>
                       <td className="p-4 font-bold text-white text-sm">{s.durationMinutes} min</td>
                       <td className="p-4 font-black text-white text-sm">{formatPrice(s.price)}</td>
-                      <td className="p-4">
+                      <td className="p-4 flex gap-2">
                         <button
                           onClick={() => onTogglePayment(s.id)}
                           className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase border transition-all ${
@@ -333,6 +367,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           }`}
                         >
                           {s.isPaid ? 'Payé' : 'Non payé'}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteSession(s.id, 'B')}
+                          className="p-2 rounded-lg bg-zinc-800 hover:bg-red-500/20 text-zinc-400 hover:text-red-500 transition-all"
+                          title="Supprimer"
+                        >
+                          🗑️
                         </button>
                       </td>
                     </tr>
@@ -380,7 +421,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div className="flex gap-4 pt-4">
               <button
                 onClick={handleSkipClient}
-                className="flex-1 py-4 bg-zinc-800 rounded-2xl font-black text-sm uppercase text-zinc-400 hover:bg-zinc-700"
+                style={{ backgroundColor: settings.themeColor }}
+                className="flex-1 py-4 rounded-2xl font-black text-sm uppercase text-black hover:brightness-110"
               >
                 Passer
               </button>
