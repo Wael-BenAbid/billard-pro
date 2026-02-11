@@ -32,6 +32,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [rateType, setRateType] = React.useState<'normal' | 'vip'>('normal');
   const [showStartModal, setShowStartModal] = React.useState(false);
   
+  // Force re-render every second to update timer display
+  const [now, setNow] = React.useState(Date.now());
+  
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+  
   // Edit session modal state
   const [editingSession, setEditingSession] = React.useState<BilliardSession | null>(null);
   const [editForm, setEditForm] = React.useState({
@@ -43,6 +53,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [adminPassword, setAdminPassword] = React.useState('');
   const [showPasswordModal, setShowPasswordModal] = React.useState(false);
   const [passwordForSession, setPasswordForSession] = React.useState<BilliardSession | null>(null);
+  
+  // Custom delete modal state
+  const [showDeleteModal, setShowDeleteModal] = React.useState(false);
+  const [sessionToDelete, setSessionToDelete] = React.useState<string | null>(null);
 
   const formatPrice = (mil: number) => {
     if (mil < 10000) return `${Math.round(mil)} mil`;
@@ -57,7 +71,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const start = typeof startTime === 'string' && startTime.includes('T') 
       ? new Date(startTime).getTime() 
       : Date.now();
-    return Date.now() - start;
+    return now - start;
   };
 
   const formatTime = (time: string | null | undefined) => {
@@ -70,15 +84,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const formatDuration = (ms: number) => {
+    if (!ms || ms < 0) return "00:00:00";
     const seconds = Math.floor((ms / 1000) % 60);
     const minutes = Math.floor((ms / (1000 * 60)) % 60);
     const hours = Math.floor(ms / (1000 * 60 * 60));
     
     const pad = (n: number) => n.toString().padStart(2, '0');
-    if (hours > 0) {
-      return `${hours}:${pad(minutes)}:${pad(seconds)}`;
-    }
-    return `${pad(minutes)}:${pad(seconds)}`;
+    return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+  };
+
+  // Calculate live price in real-time
+  const calculateLivePrice = (startTime: string | null | undefined, ratePerHour: number = 10) => {
+    if (!startTime) return "0.000";
+    const start = typeof startTime === 'string' && startTime.includes('T') 
+      ? new Date(startTime).getTime() 
+      : Date.now();
+    const diffHours = (now - start) / (1000 * 60 * 60);
+    const price = diffHours * ratePerHour;
+    return price.toFixed(3);
   };
 
   // Calculate occupation rate for today
@@ -126,12 +149,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
       setClientName(active.clientName || '');
       setShowStartModal(false);
     } else {
-      // Show start modal with client selection
-      setCompletedSession(null);
-      setCompletedTableId(tableId);
-      setClientName('');
-      setRateType('normal');
-      setShowStartModal(true);
+      // Direct start without modal - use default values
+      onStartStop(tableId, 'Anonyme', 'normal');
     }
   };
 
@@ -167,13 +186,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   const handleDeleteSession = (sessionId: string) => {
     if (isAdmin) {
-      if (window.confirm('Voulez-vous vraiment supprimer cette session ?')) {
-        onDeleteSession(sessionId);
-      }
+      setSessionToDelete(sessionId);
+      setShowDeleteModal(true);
     } else {
       // Request admin password first
       setPasswordForSession(sessions.find(s => s.id === sessionId) || null);
       setShowPasswordModal(true);
+    }
+  };
+
+  const confirmDeleteSession = () => {
+    if (sessionToDelete) {
+      onDeleteSession(sessionToDelete);
+      setShowDeleteModal(false);
+      setSessionToDelete(null);
     }
   };
 
@@ -295,6 +321,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   {formatDuration(elapsed)}
                 </p>
               </div>
+
+              {/* Live Price Display */}
+              {active && (
+                <div className="bg-black/40 backdrop-blur-sm rounded-[1.5rem] p-4 mb-6 text-center border border-white/5">
+                  <p className="text-zinc-500 text-[8px] font-black uppercase mb-1 tracking-widest">
+                    EN COURS
+                  </p>
+                  <p
+                    style={{ color: tableColor }}
+                    className="text-2xl font-mono font-black"
+                  >
+                    {calculateLivePrice(active.startTime)} DT
+                  </p>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4 mb-6">
                 <div className="bg-black/40 backdrop-blur-sm p-4 rounded-[1.5rem] border border-white/5 text-center">
@@ -822,6 +863,44 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 className="flex-1 py-4 rounded-2xl font-black text-sm uppercase text-black hover:brightness-110"
               >
                 Valider
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-6 bg-black/85 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="w-full max-w-sm bg-zinc-900 rounded-[3rem] border border-white/10 p-10 shadow-2xl" style={{ borderTop: '4px solid #ff3b30' }}>
+            <div className="text-center">
+              <div className="w-16 h-16 mx-auto rounded-full flex items-center justify-center mb-4 bg-red-500/20">
+                <span className="text-3xl">🗑️</span>
+              </div>
+              <h2 className="text-2xl font-black italic text-white">
+                Confirmation
+              </h2>
+              <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mt-2">
+                Voulez-vous vraiment supprimer cette session ?
+              </p>
+            </div>
+
+            <div className="flex gap-4 pt-6">
+              <button
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setSessionToDelete(null);
+                }}
+                className="flex-1 py-4 bg-zinc-800 rounded-2xl font-black text-sm uppercase text-zinc-400 hover:bg-zinc-700 transition-all"
+              >
+                ANNULER
+              </button>
+              <button
+                onClick={confirmDeleteSession}
+                className="flex-1 py-4 bg-red-500 rounded-2xl font-black text-sm uppercase text-white hover:bg-red-600 transition-all"
+                style={{ boxShadow: '0 0 15px rgba(255, 59, 48, 0.4)' }}
+              >
+                SUPPRIMER
               </button>
             </div>
           </div>
