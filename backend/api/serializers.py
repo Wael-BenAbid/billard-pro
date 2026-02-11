@@ -15,9 +15,9 @@ class UserLoginSerializer(serializers.Serializer):
 
 
 class BilliardSessionSerializer(serializers.ModelSerializer):
-    # Override datetime fields to use ISO format
-    start_time = serializers.DateTimeField(format='%H:%M:%S', required=False)
-    stop_time = serializers.DateTimeField(format='%H:%M:%S', required=False, allow_null=True)
+    # Override datetime fields to use full ISO format for proper timestamp calculation
+    start_time = serializers.DateTimeField(format='%Y-%m-%dT%H:%M:%S.%f', required=False)
+    stop_time = serializers.DateTimeField(format='%Y-%m-%dT%H:%M:%S.%f', required=False, allow_null=True)
     date = serializers.DateField(format='%Y-%m-%d')
     
     class Meta:

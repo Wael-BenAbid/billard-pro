@@ -64,23 +64,46 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return `${dt.toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 3 })} DT`;
   };
 
+  // Robust parser for datetime strings - handles ISO format and legacy time-only format
+  const parseDateTime = (timeStr: string | null | undefined): number | null => {
+    if (!timeStr) return null;
+    
+    // If it's already a number (timestamp), return it directly
+    if (typeof timeStr === 'number') return timeStr;
+    
+    // If it's a string with 'T', it's ISO format - parse it
+    if (timeStr.includes('T')) {
+      const parsed = new Date(timeStr).getTime();
+      return isNaN(parsed) ? null : parsed;
+    }
+    
+    // If it's a pure time string (HH:MM:SS) without date, we can't calculate elapsed time
+    // This prevents the fallback to Date.now() which causes 00:00:00 display
+    return null;
+  };
+
   // Professional timer: calculate elapsed time from startTime timestamp
   // This ensures accuracy even if page is refreshed
   const calculateElapsed = (startTime: string | null | undefined) => {
-    if (!startTime) return 0;
-    const start = typeof startTime === 'string' && startTime.includes('T') 
-      ? new Date(startTime).getTime() 
-      : Date.now();
+    const start = parseDateTime(startTime);
+    if (start === null) return 0;
     return now - start;
   };
 
   const formatTime = (time: string | null | undefined) => {
     if (!time) return '--:--';
+    // Try to parse as ISO datetime first
     if (time.includes('T')) {
       const date = new Date(time);
-      return date.toLocaleTimeString('fr-FR', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      if (!isNaN(date.getTime())) {
+        return date.toLocaleTimeString('fr-FR', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      }
     }
-    return time;
+    // If it's just HH:MM:SS format, return it directly
+    if (/^\d{2}:\d{2}:\d{2}$/.test(time)) {
+      return time;
+    }
+    return '--:--';
   };
 
   const formatDuration = (ms: number) => {
@@ -95,10 +118,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // Calculate live price in real-time
   const calculateLivePrice = (startTime: string | null | undefined, ratePerHour: number = 10) => {
-    if (!startTime) return "0.000";
-    const start = typeof startTime === 'string' && startTime.includes('T') 
-      ? new Date(startTime).getTime() 
-      : Date.now();
+    const start = parseDateTime(startTime);
+    if (start === null) return "0.000";
     const diffHours = (now - start) / (1000 * 60 * 60);
     const price = diffHours * ratePerHour;
     return price.toFixed(3);

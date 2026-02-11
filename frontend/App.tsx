@@ -185,6 +185,9 @@ const App: React.FC = () => {
           const sessionsData = await sessionsRes.json();
           setSessions(sessionsData.map((s: any) => ({
             ...toCamelCase(s),
+            // Convert startTime and stopTime to timestamps for reliable calculations
+            startTime: s.start_time ? (s.start_time.includes('T') ? s.start_time : null) : null,
+            stopTime: s.stop_time ? (s.stop_time.includes('T') ? s.stop_time : null) : null,
             timestamp: new Date(s.timestamp).getTime(),
           })));
         }
