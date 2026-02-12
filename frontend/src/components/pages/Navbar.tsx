@@ -1,10 +1,9 @@
 import React from 'react';
+import { NavLink } from 'react-router-dom';
 
 interface NavbarProps {
   clubName: string;
   themeColor: string;
-  activeTab: string;
-  onTabChange: (tab: 'dashboard' | 'ps4' | 'bar' | 'analytics' | 'admin') => void;
   onLogout: () => void;
   currentTime: Date;
 }
@@ -12,17 +11,16 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   clubName,
   themeColor,
-  activeTab,
-  onTabChange,
   onLogout,
   currentTime,
 }) => {
-  const tabs: { id: string; label: string }[] = [
-    { id: 'dashboard', label: 'Tables' },
-    { id: 'ps4', label: 'PS4' },
-    { id: 'bar', label: 'Bar' },
-    { id: 'analytics', label: 'Stats' },
-    { id: 'admin', label: 'Paramètres' },
+  const tabs: { id: string; label: string; path: string }[] = [
+    { id: 'counter', label: 'Tables', path: '/' },
+    { id: 'ps4', label: 'PS4', path: '/ps4' },
+    { id: 'bar', label: 'Bar', path: '/bar' },
+    { id: 'analytics', label: 'Stats', path: '/analytics' },
+    { id: 'admin', label: 'Admin', path: '/admin' },
+    { id: 'settings', label: 'Paramètres', path: '/settings' },
   ];
 
   return (
@@ -36,17 +34,19 @@ export const Navbar: React.FC<NavbarProps> = ({
         </h2>
         <div className="flex bg-zinc-900/50 p-1 rounded-2xl border border-white/5 gap-1">
           {tabs.map(t => (
-            <button
+            <NavLink
               key={t.id}
-              onClick={() => onTabChange(t.id as any)}
-              className={`px-5 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${
-                activeTab === t.id
-                  ? 'bg-zinc-800 text-white shadow-xl'
-                  : 'text-zinc-500 hover:text-white'
-              }`}
+              to={t.path}
+              className={({ isActive }) =>
+                `px-5 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${
+                  isActive
+                    ? 'bg-zinc-800 text-white shadow-xl'
+                    : 'text-zinc-500 hover:text-white'
+                }`
+              }
             >
               {t.label}
-            </button>
+            </NavLink>
           ))}
         </div>
       </div>

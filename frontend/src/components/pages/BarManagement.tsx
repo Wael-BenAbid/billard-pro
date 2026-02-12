@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { InventoryItem, AppSettings, ConsumedItem } from '../../../types';
+import { InventoryItem, ConsumedItem, AppSettings } from '../../../types';
+import { useAppContext } from '../../context/AppContext';
 
 interface BarItem {
   id: string;
@@ -11,17 +12,10 @@ interface BarItem {
   isPaid: boolean;
 }
 
-interface BarManagementProps {
-  settings: AppSettings;
-  onUpdateSettings: (settings: AppSettings) => void;
-}
-
 const API_URL = 'http://localhost:8000/api';
 
-export const BarManagement: React.FC<BarManagementProps> = ({
-  settings,
-  onUpdateSettings,
-}) => {
+export const BarManagement: React.FC = () => {
+  const { settings, setSettings } = useAppContext();
   const [barItems, setBarItems] = useState<BarItem[]>([]);
   const [currentOrder, setCurrentOrder] = useState<{ name: string; items: ConsumedItem[] } | null>(null);
   const [showClientPrompt, setShowClientPrompt] = useState(false);

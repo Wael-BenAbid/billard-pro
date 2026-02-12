@@ -3,6 +3,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.contrib.auth.hashers import make_password, check_password
+from django.utils import timezone
+import json
 from .models import User, BilliardSession, PS4Session, InventoryItem, PS4Game, PS4TimeOption, AppSettings, BarOrder, Client
 from .serializers import (
     UserSerializer, UserLoginSerializer, BilliardSessionSerializer, 
@@ -49,6 +51,147 @@ class BilliardSessionViewSet(viewsets.ModelViewSet):
         if date:
             queryset = queryset.filter(date=date)
         return queryset
+    
+    @action(detail=False, methods=['post'])
+    def start(self, request):
+        """
+        Start a new session for a table.
+        Required fields: table_id
+        Optional fields: client_name
+        """
+        try:
+            table_id = request.data.get('table_id')
+            if not table_id:
+                return Response(
+                    {'error': 'table_id is required'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Check if table already has active session
+            active = BilliardSession.objects.filter(
+                table_id=table_id,
+                stop_time__isnull=True
+            ).first()
+            
+            if active:
+                return Response(
+                    {'error': f'Table {table_id} already has an active session'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Create new session with ISO datetime
+            now = timezone.now()
+            session = BilliardSession.objects.create(
+                table_id=table_id,
+                start_time=now,
+                stop_time=None,
+                duration_minutes=0,
+                price=0,
+                client_name=request.data.get('client_name', 'Anonyme'),
+                is_paid=False,
+                date=now.date(),
+                timestamp=int(now.timestamp() * 1000)
+            )
+            
+            return Response(
+                BilliardSessionSerializer(session).data,
+                status=status.HTTP_201_CREATED
+            )
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    @action(detail=False, methods=['post'])
+    def stop(self, request):
+        """
+        Stop an active session and calculate price.
+        Required fields: table_id
+        """
+        try:
+            table_id = request.data.get('table_id')
+            if not table_id:
+                return Response(
+                    {'error': 'table_id is required'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Find active session
+            session = BilliardSession.objects.filter(
+                table_id=table_id,
+                stop_time__isnull=True
+            ).order_by('-start_time').first()
+            
+            if not session:
+                return Response(
+                    {'error': f'No active session found for table {table_id}'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Validate start_time exists
+            if not session.start_time:
+                return Response(
+                    {'error': 'Session has no start_time'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Calculate duration and price
+            now = timezone.now()
+            duration = now - session.start_time
+            duration_minutes = int(duration.total_seconds() / 60)
+            
+            # Get settings for pricing
+            try:
+                settings = AppSettings.objects.first()
+                rate_base = float(settings.rate_base) if settings else 150
+                rate_reduced = float(settings.rate_reduced) if settings else 135
+                threshold_mins = settings.threshold_mins if settings else 15
+                floor_min = float(settings.floor_min) if settings else 1000
+                floor_mid = float(settings.floor_mid) if settings else 1500
+            except:
+                rate_base = 150
+                rate_reduced = 135
+                threshold_mins = 15
+                floor_min = 1000
+                floor_mid = 1500
+            
+            # Calculate price (in millimes)
+            if duration_minutes <= threshold_mins:
+                time_price = duration_minutes * rate_base
+            else:
+                time_price = (threshold_mins * rate_base) + ((duration_minutes - threshold_mins) * rate_reduced)
+            
+            # Apply floor rules
+            if time_price < floor_min:
+                final_price = floor_min
+            elif floor_min <= time_price < floor_mid:
+                final_price = floor_mid
+            else:
+                final_price = time_price
+            
+            # Update session
+            session.stop_time = now
+            session.duration_minutes = duration_minutes
+            session.price = final_price
+            session.save()
+            
+            return Response(
+                BilliardSessionSerializer(session).data
+            )
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    @action(detail=False, methods=['get'])
+    def active(self, request):
+        """Get all active sessions (no stop_time)"""
+        active_sessions = BilliardSession.objects.filter(stop_time__isnull=True)
+        return Response(
+            BilliardSessionSerializer(active_sessions, many=True).data
+        )
     
     @action(detail=True, methods=['delete'])
     def delete_session(self, request, pk=None):

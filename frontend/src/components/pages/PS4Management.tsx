@@ -1,28 +1,59 @@
 import React, { useState } from 'react';
 import { PS4Game, PS4Session, PS4TimeOption, AppSettings } from '../../../types';
+import { useAppContext } from '../../context/AppContext';
 
-interface PS4ManagementProps {
-  ps4Sessions: PS4Session[];
-  settings: AppSettings;
-  onAddPS4Session: (timeOpt: PS4TimeOption, game: PS4Game, players: number) => void;
-  onSaveGame: (game: PS4Game) => void;
-  onDeleteGame: (id: string) => void;
-  onUpdateSettings: (settings: AppSettings) => void;
-}
-
-export const PS4Management: React.FC<PS4ManagementProps> = ({
-  ps4Sessions,
-  settings,
-  onAddPS4Session,
-  onSaveGame,
-  onDeleteGame,
-  onUpdateSettings,
-}) => {
+export const PS4Management: React.FC = () => {
+  const { 
+    ps4Sessions, 
+    settings, 
+    savePS4SessionToAPI,
+    setSettings 
+  } = useAppContext();
+  
   const [ps4Step, setPs4Step] = useState<'game' | 'players' | 'time'>('game');
   const [selectedPs4Game, setSelectedPs4Game] = useState<PS4Game | null>(null);
   const [selectedPs4Players, setSelectedPs4Players] = useState<number | null>(null);
   const [isEditingGame, setIsEditingGame] = useState(false);
   const [editingGame, setEditingGame] = useState<PS4Game | null>(null);
+
+  const onAddPS4Session = (timeOpt: PS4TimeOption, game: PS4Game, players: number) => {
+    const newSess: PS4Session = {
+      id: Math.random().toString(36).substr(2, 9),
+      gameId: game.id,
+      gameName: game.name,
+      players,
+      durationMinutes: timeOpt.minutes,
+      price: timeOpt.price,
+      date: new Date().toISOString().split('T')[0],
+      timestamp: Date.now(),
+    };
+    savePS4SessionToAPI(newSess);
+  };
+
+  const onSaveGame = (game: PS4Game) => {
+    const exists = settings.ps4Games.find(g => g.id === game.id);
+    if (exists) {
+      setSettings({
+        ...settings,
+        ps4Games: settings.ps4Games.map(g => (g.id === game.id ? game : g)),
+      });
+    } else {
+      setSettings({ ...settings, ps4Games: [...settings.ps4Games, game] });
+    }
+  };
+
+  const onDeleteGame = (id: string) => {
+    if (window.confirm('Supprimer ce jeu ?')) {
+      setSettings({
+        ...settings,
+        ps4Games: settings.ps4Games.filter(g => g.id !== id),
+      });
+    }
+  };
+
+  const onUpdateSettings = (newSettings: AppSettings) => {
+    setSettings(newSettings);
+  };
 
   const formatPrice = (mil: number) => {
     if (mil < 10000) return `${Math.round(mil)} mil`;

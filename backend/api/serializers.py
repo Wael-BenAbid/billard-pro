@@ -15,15 +15,70 @@ class UserLoginSerializer(serializers.Serializer):
 
 
 class BilliardSessionSerializer(serializers.ModelSerializer):
-    # Override datetime fields to use full ISO format for proper timestamp calculation
-    start_time = serializers.DateTimeField(format='%Y-%m-%dT%H:%M:%S.%f', required=False)
-    stop_time = serializers.DateTimeField(format='%Y-%m-%dT%H:%M:%S.%f', required=False, allow_null=True)
+    """Serializer avec format ISO 8601 pour datetime"""
+    
+    # Format explicite ISO 8601
+    start_time = serializers.DateTimeField(
+        format='%Y-%m-%dT%H:%M:%S.%f',
+        required=False,
+        allow_null=False  # Interdit null
+    )
+    stop_time = serializers.DateTimeField(
+        format='%Y-%m-%dT%H:%M:%S.%f',
+        required=False,
+        allow_null=True
+    )
     date = serializers.DateField(format='%Y-%m-%d')
     
     class Meta:
         model = BilliardSession
         fields = '__all__'
         read_only_fields = ['id', 'created_at', 'updated_at']
+    
+    def validate_start_time(self, value):
+        """Valider que start_time n'est pas null et est un datetime valide"""
+        if value is None:
+            raise serializers.ValidationError("start_time cannot be null")
+        return value
+    
+    def validate(self, attrs):
+        """Validation globale"""
+        start_time = attrs.get('start_time')
+        stop_time = attrs.get('stop_time')
+        
+        if start_time and stop_time:
+            if stop_time < start_time:
+                raise serializers.ValidationError({
+                    'stop_time': 'stop_time cannot be before start_time'
+                })
+        
+        return attrs
+    
+    def to_representation(self, instance):
+        """Conversion snake_case vers camelCase pour frontend"""
+        data = super().to_representation(instance)
+        camel_data = {}
+        for key, value in data.items():
+            if value is None:
+                # Gérer les cas null
+                if key.startswith('_'):
+                    camel_data[key] = value
+                else:
+                    camel_data[key.replace('_', '', 1)] = value
+                continue
+            
+            # Convertir snake_case vers camelCase
+            camel_key = ''
+            for i, char in enumerate(key):
+                if char == '_':
+                    continue
+                if i > 0 and key[i-1] == '_':
+                    camel_key += char.upper()
+                else:
+                    camel_key += char
+            camel_data[camel_key] = value
+        
+        return camel_data
     
     def to_internal_value(self, data):
         # Convert camelCase to snake_case
@@ -39,25 +94,6 @@ class BilliardSessionSerializer(serializers.ModelSerializer):
                     snake_key += char
             converted[snake_key] = value
         return super().to_internal_value(converted)
-    
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-        # Convert snake_case to camelCase for frontend
-        camel_data = {}
-        for key, value in data.items():
-            if value is None:
-                camel_data[key.replace('_', '', 1)] = value if not key.startswith('_') else key
-                continue
-            camel_key = ''
-            for i, char in enumerate(key):
-                if char == '_':
-                    continue
-                if i > 0 and key[i-1] == '_':
-                    camel_key += char.upper()
-                else:
-                    camel_key += char
-            camel_data[camel_key] = value
-        return camel_data
 
 
 class PS4SessionSerializer(serializers.ModelSerializer):
